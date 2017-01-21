@@ -1,0 +1,207 @@
+<!DOCTYPE>
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8">
+    <title>進化ビューワー</title>
+    <script type="text/javascript" src="jquery.js"></script>
+    <script type="text/javascript" src="vis.js"></script>
+    <link href="vis.css" rel="stylesheet" type="text/css" />
+    <script type="text/javascript" src="jquery.xdomainajax.js"></script>
+<style type="text/css">
+#mynetwork {
+  width: 600px;
+  height: 400px;
+  border: 1px solid lightgray;
+}
+</style>
+  </head>
+  <body>
+    <script type="text/javascript">
+var searchMonster=function(){
+  name=$('[name="monster"]').val();
+  jQuery.ajax({
+    url:"https://www18.atwiki.jp/pazdra",
+    type: "GET",
+    data: {
+      cmd     : "tagsearch",
+      keyword : name,
+      andor   : "and",
+      opt1    : "1"
+    },
+    success: function(data){
+      var str = data.responseText;
+      var reg1 = new RegExp('<li><a href="//www18.atwiki.jp/pazdra/tag/.*>.*</a></li>',"g")
+      var reg2 = new RegExp('<li><a href="//www18.atwiki.jp/pazdra/pages/.*図鑑/.*>.*</a>',"g")
+      var reg3 = new RegExp('図鑑/[0-9]*(?= )',"g");
+      var monsters = str.match(reg1);
+      var numbers  = str.match(reg2);
+      var numbers2  = str.match(reg3);
+      for( i in numbers2){
+        numbers2[i]=numbers2[i].slice(3);
+      }
+      console.log(numbers2);
+      for( var i in str.match(reg1)){
+        var res = numbers[i].match('//www18.atwiki.jp/pazdra/pages/.*\.html');
+        res[0]="https:"+res[0];
+        var url = 'http://img.atwikiimg.com/www18.atwiki.jp/pazdra/pub/icon/'+numbers2[i]+'.png';
+        console.log(url);
+
+        var imgPreloader = new Image();
+        imgPreloader.indexbuffer= i;
+        imgPreloader.onload=function(){
+          $('#'+numbers2[this.indexbuffer]).attr({'src':this.src,'width':50,'height':50});
+          console.log(numbers2[this.indexbuffer]);
+        }
+        imgPreloader.src=url;
+
+        $('#result').append('<img id='+numbers2[i]+' onclick="loadMonsterStat(\''+res[0]+'\')">'+'</img>');
+      }
+    }
+  });
+}
+
+
+count = 1;
+arrayNodes = [];
+arrayEdges = [];
+var loadMonsterStat=function(path){
+
+  jQuery.ajax({
+    url: path,
+    type: "GET",
+    success: function(data){
+      //同期用の変数
+      var __count=0;
+      var __maxCount=1;
+
+      var document_obj =$(data.responseText);
+      console.log(document_obj.find("#wikibody h2:contains('進化・合成情報')").next());
+      var text = document_obj.find("#wikibody h2:contains('進化・合成情報')").next().text();
+      var zukan = document_obj.find("#wikibody h2:contains('進化・合成情報')").next().find('a');
+
+      //図鑑番号とモンスター名の対応を記録
+      var zukanId = {};
+      zukan.each(function(i,e){
+        if(e.title !=undefined){
+          zukanId[e['text'].replace(/ /,"")]={ 
+            id:   e.title.slice(3).match(/[^ ]*/)[0],
+            url:  'http://img.atwikiimg.com/www18.atwiki.jp/pazdra/pub/icon/'+e.title.slice(3).match(/[^ ]*/)[0]+'.png'
+          };
+        }
+      });
+      //関係してそうなキャラクターの画像をとりあえずDL
+      var _count=0;
+      var _maxCount=Object.keys(zukanId).length-1;
+      var _onload = function(){
+        if(_count<_maxCount)_count++;
+        else {
+          console.log("images is loaded");
+          onload();
+        }
+      }
+      for( var i in zukanId){
+        var imgPreloader = new Image();
+        imgPreloader.indexbuffer= zukanId[i]['id'];
+        imgPreloader.onload=_onload;
+        imgPreloader.src=zukanId[i]['url'];
+      }
+
+      text = text.replace(/進化：/,"");
+      console.log(text);
+      var i= text.search(/同スキル/);
+      if(i!=-1)text = text.slice(0,i-1);
+      var texts = text.split("\n");
+      console.log(texts);
+      var list = {};
+      var orderedMonsters={};
+
+      for(var t of texts){
+        t = t.replace(/ /g,"");
+        var mom = t.split('>');
+        for(var imom = 0; imom < mom.length-1;imom++){
+          //進化前の分岐を評価
+          var seq = mom[imom].search("\\(|（");
+          if(seq!=-1){
+            var before = mom[imom].slice(seq+1,-1).split("/");
+          }else{
+            var before=[mom[imom]];
+          }
+          //進化後の分岐を評価
+          seq = mom[imom+1].search("\\(|（");
+          if(seq!=-1){
+            var type = mom[imom+1].slice(0,seq);
+            var characters = mom[imom+1].slice(seq+1,-1).split("/");
+            console.log(type);
+            console.log(characters);
+          }else{
+            var type="通常進化";
+            var characters=[mom[imom+1]];
+          }
+          for( var a of before){
+            list[a]={'next':characters,'type':type};
+          }
+        }
+      }
+      console.log(list);
+      for( var l in list){
+        if(orderedMonsters[l]==null) orderedMonsters[l]=count++;
+        for( var m of list[l]['next']){
+          if(orderedMonsters[m]==null) orderedMonsters[m]=count++;
+        }
+      }
+      console.log(orderedMonsters);
+      onload();
+
+      function onload(){
+        console.log("onload is called");
+        if(__count<__maxCount)__count++;
+        else{
+          //ノードの作成
+          for( var key in orderedMonsters) arrayNodes.push({'id':orderedMonsters[key],'label':key,
+          image:zukanId[key]['url'] ,shape:'image'});
+          var monsterNodes = new vis.DataSet(arrayNodes);
+          //エッジの作成
+          for( var key in list){
+            for(var m of list[key]['next']){
+              arrayEdges.push({'from':orderedMonsters[key],'to':orderedMonsters[m],arrows:'to'})
+            }
+          }
+          var monsterEdges = new vis.DataSet(arrayEdges);
+          console.log(arrayNodes);
+          console.log(arrayEdges);
+          // create a network
+          var container = document.getElementById('mynetwork');
+
+          // provide the data in the vis format
+          var data = {
+            nodes: arrayNodes,
+            edges: arrayEdges
+          };
+          var options = {
+            layout: {
+              hierarchical: {
+                direction: "UD",
+                sortMethod: "directed"
+              }
+            }
+          };
+
+          // initialize your network!
+          var network = new vis.Network(container, data, options);
+        }
+      }
+    }
+  });
+}
+
+                loadMonsterStat();
+
+    </script>
+    <p>モンスター名:<input type="text" name="monster"></p>
+    <button type="button" name="search button" onclick="searchMonster()">検索</button>
+    <div id="result"></div>
+
+    <div id="mynetwork" style="width:1800px;"></div>
+  </body>
+</html>
